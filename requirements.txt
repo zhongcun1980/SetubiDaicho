@@ -1,0 +1,4 @@
+xlrd==2.0.2
+pywin32>=306
+
+# exe 化: pip install pyinstaller && build.bat

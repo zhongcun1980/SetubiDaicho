@@ -1,0 +1,7 @@
+{
+  "root_folder": "C:\\Users\\user\\Documents\\設備台帳",
+  "filename_contains": "診断表",
+  "recursive": true,
+  "extensions": [".xls", ".xlsx"],
+  "database_path": "data.db"
+}

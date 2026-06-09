@@ -1,0 +1,22 @@
+{
+  "column_order": [
+    "facility_name",
+    "equipment_name",
+    "specification",
+    "manufacturer",
+    "model",
+    "install_year",
+    "middle_category",
+    "major_category"
+  ],
+  "column_widths": {
+    "facility_name": 140,
+    "equipment_name": 160,
+    "major_category": 120,
+    "middle_category": 140,
+    "install_year": 70,
+    "manufacturer": 113,
+    "model": 120,
+    "specification": 385
+  }
+}
