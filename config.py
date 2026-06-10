@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from json import JSONDecodeError
 from pathlib import Path
 
 from app_paths import get_app_dir, get_config_path
@@ -35,6 +36,75 @@ class AppConfig:
         )
 
 
+def _escape_backslashes_in_json_strings(text: str) -> str:
+    """JSON 文字列内の未エスケープ \\ を \\\\ に補正する（Windows パス用）。"""
+    out: list[str] = []
+    in_string = False
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if not in_string:
+            out.append(char)
+            if char == '"':
+                in_string = True
+            i += 1
+            continue
+
+        if char == '"':
+            out.append(char)
+            in_string = False
+            i += 1
+            continue
+
+        if char != "\\":
+            out.append(char)
+            i += 1
+            continue
+
+        if i + 1 >= len(text):
+            out.append("\\\\")
+            i += 1
+            continue
+
+        next_char = text[i + 1]
+        if next_char == "u":
+            hex_part = text[i + 2 : i + 6]
+            if len(hex_part) == 4 and all(ch in "0123456789abcdefABCDEF" for ch in hex_part):
+                out.append(text[i : i + 6])
+                i += 6
+                continue
+            out.append("\\\\")
+            i += 1
+            continue
+
+        if next_char in '"\\/':
+            out.append(char)
+            out.append(next_char)
+            i += 2
+            continue
+
+        out.append("\\\\")
+        i += 1
+
+    return "".join(out)
+
+
+def _load_config_data(text: str, config_path: Path) -> dict:
+    try:
+        return json.loads(text)
+    except JSONDecodeError as first_error:
+        try:
+            return json.loads(_escape_backslashes_in_json_strings(text))
+        except JSONDecodeError as second_error:
+            raise ValueError(
+                f"設定ファイルの形式が正しくありません: {config_path}\n"
+                "フォルダパスは次のいずれかの形式で指定できます。\n"
+                "  C:/Users/設備台帳\n"
+                "  C:\\Users\\設備台帳\n"
+                f"詳細: {second_error}"
+            ) from first_error
+
+
 def load_config(path: str | Path | None = None) -> AppConfig:
     config_path = Path(path) if path else DEFAULT_CONFIG_PATH
     if not config_path.exists():
@@ -43,8 +113,8 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             f"search.exe と同じフォルダに config.json を配置してください。"
         )
 
-    with config_path.open(encoding="utf-8") as fp:
-        data = json.load(fp)
+    text = config_path.read_text(encoding="utf-8")
+    data = _load_config_data(text, config_path)
 
     if "root_folder" not in data:
         raise ValueError("設定ファイルに root_folder が指定されていません")

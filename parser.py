@@ -9,7 +9,13 @@ from pathlib import Path
 import xlrd
 
 SHEET_PATTERN = re.compile(r"^帳票\d+$")
-BLOCK_MARKERS = ("機械設備", "電気計装設備")
+BLOCK_MARKERS = (
+    "機械設備",
+    "電気計装設備",
+    "建築電気設備",
+    "建築",
+    "土木",
+)
 MAX_BLOCK_ROWS = 59
 
 

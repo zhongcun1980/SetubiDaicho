@@ -35,6 +35,7 @@ ROW_BG_EVEN = "#f2f2f2"
 TREE_STYLE = "Equipment.Treeview"
 ROW_TAG_ODD = "row_odd"
 ROW_TAG_EVEN = "row_even"
+ALL_FACILITIES = "（すべて）"
 
 
 class EquipmentListApp(tk.Tk):
@@ -52,7 +53,7 @@ class EquipmentListApp(tk.Tk):
         self._heading_press_x = 0
         self._heading_dragging = False
 
-        self.title("設備台帳 MVP - 設備一覧")
+        self.title("設備台帳")
         self.geometry("1280x720")
         self.minsize(900, 500)
 
@@ -110,6 +111,22 @@ class EquipmentListApp(tk.Tk):
         ttk.Button(search_row, text="クリア", command=self._on_clear_search).pack(side=tk.LEFT, padx=(0, 12))
         ttk.Button(search_row, text="登録", command=self._on_register).pack(side=tk.RIGHT)
 
+        result_row = ttk.Frame(header)
+        result_row.pack(fill=tk.X, pady=(6, 0))
+        ttk.Label(result_row, text="施設名:").pack(side=tk.LEFT)
+        self.facility_var = tk.StringVar(value=ALL_FACILITIES)
+        self.facility_combo = ttk.Combobox(
+            result_row,
+            textvariable=self.facility_var,
+            width=28,
+            state="readonly",
+        )
+        self.facility_combo.pack(side=tk.LEFT, padx=(4, 0))
+        self.facility_combo.bind("<<ComboboxSelected>>", self._on_facility_selected)
+        self._refresh_facility_combo(preserve_selection=False)
+        self.result_count_var = tk.StringVar(value="")
+        ttk.Label(result_row, textvariable=self.result_count_var).pack(side=tk.RIGHT)
+
         table_frame = ttk.Frame(self, padding=(12, 0, 12, 6))
         table_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -131,6 +148,7 @@ class EquipmentListApp(tk.Tk):
                 width=width,
                 minwidth=MIN_COLUMN_WIDTH,
                 stretch=False,
+                anchor=tk.W,
             )
 
         self._apply_column_layout()
@@ -185,7 +203,11 @@ class EquipmentListApp(tk.Tk):
 
     def _update_headings(self) -> None:
         for col_id in self.column_order:
-            self.tree.heading(col_id, text=self._heading_text(col_id))
+            self.tree.heading(
+                col_id,
+                text=self._heading_text(col_id),
+                anchor=tk.W,
+            )
 
     def _column_id_at(self, x: int) -> str | None:
         column = self.tree.identify_column(x)
@@ -287,24 +309,75 @@ class EquipmentListApp(tk.Tk):
         items = history if history is not None else load_history()
         self.search_combo["values"] = items
 
-    def _run_search(self, query: str, *, save_history: bool) -> None:
-        results = search_records(self.load_result.records, query)
+    def _facility_names(self) -> list[str]:
+        names = {
+            record.facility_name.strip()
+            for record in self.load_result.records
+            if record.facility_name.strip()
+        }
+        return sorted(names)
+
+    def _refresh_facility_combo(self, *, preserve_selection: bool = True) -> None:
+        values = [ALL_FACILITIES, *self._facility_names()]
+        current = self.facility_var.get()
+        self.facility_combo["values"] = values
+        if preserve_selection and current in values:
+            self.facility_var.set(current)
+        else:
+            self.facility_var.set(ALL_FACILITIES)
+
+    def _selected_facility(self) -> str:
+        facility = self.facility_var.get().strip()
+        if facility == ALL_FACILITIES:
+            return ""
+        return facility
+
+    def _records_for_facility(self, records: list[EquipmentRecord]) -> list[EquipmentRecord]:
+        facility = self._selected_facility()
+        if not facility:
+            return records
+        return [record for record in records if record.facility_name == facility]
+
+    def _update_result_count(self, count: int) -> None:
+        self.result_count_var.set(f"検索結果: {count} 件")
+
+    def _apply_filters(self, *, save_history: bool = False) -> None:
+        query = self.search_var.get()
+        facility = self._selected_facility()
+        records = self._records_for_facility(self.load_result.records)
+
+        if query.strip():
+            results = search_records(records, query)
+            if save_history:
+                self._refresh_history_combo(add_history(query))
+        elif facility:
+            results = records
+        else:
+            results = []
+
         self._populate_table(results)
-        if save_history and query.strip():
-            self._refresh_history_combo(add_history(query))
+        if results or facility or query.strip():
+            self._update_result_count(len(results))
+        else:
+            self.result_count_var.set("")
 
     def _on_search(self, _event: tk.Event | None = None) -> None:
-        self._run_search(self.search_var.get(), save_history=True)
+        self._apply_filters(save_history=True)
+
+    def _on_facility_selected(self, _event: tk.Event | None = None) -> None:
+        self._apply_filters()
 
     def _on_history_selected(self, _event: tk.Event | None = None) -> None:
         selected = self.search_var.get().strip()
         if not selected:
             return
-        self._run_search(selected, save_history=False)
+        self._apply_filters()
 
     def _on_clear_search(self) -> None:
         self.search_var.set("")
+        self.facility_var.set(ALL_FACILITIES)
         self._populate_table([])
+        self.result_count_var.set("")
         self.search_combo.focus_set()
 
     @staticmethod
@@ -367,6 +440,8 @@ class EquipmentListApp(tk.Tk):
                 return
 
             self.load_result = load_result
+            self._refresh_facility_combo()
+            self._apply_filters()
 
             message = (
                 f"{result.registered_count} 件を登録しました。\n"
