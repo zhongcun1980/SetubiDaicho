@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from parser import EquipmentRecord
+
+REGISTER_PROGRESS_INTERVAL = 100
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS equipment (
@@ -46,7 +49,13 @@ def init_database(db_path: Path) -> None:
         conn.commit()
 
 
-def register_records(records: list[EquipmentRecord], db_path: Path) -> RegisterResult:
+def register_records(
+    records: list[EquipmentRecord],
+    db_path: Path,
+    *,
+    on_progress: Callable[[int], None] | None = None,
+    progress_interval: int = REGISTER_PROGRESS_INTERVAL,
+) -> RegisterResult:
     init_database(db_path)
     imported_at = datetime.now().isoformat(timespec="seconds")
     errors: list[str] = []
@@ -95,12 +104,17 @@ def register_records(records: list[EquipmentRecord], db_path: Path) -> RegisterR
                     ),
                 )
                 registered_count += 1
+                if on_progress and registered_count % progress_interval == 0:
+                    on_progress(registered_count)
             except sqlite3.Error as exc:
                 errors.append(
                     f"{Path(record.source_file).name} / {record.sheet_name} / "
                     f"行{record.block_row}: {exc}"
                 )
         conn.commit()
+
+    if on_progress and registered_count > 0 and registered_count % progress_interval != 0:
+        on_progress(registered_count)
 
     return RegisterResult(
         registered_count=registered_count,

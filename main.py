@@ -7,7 +7,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from config import DEFAULT_CONFIG_PATH, load_config
-from database import load_records, register_records
+from database import REGISTER_PROGRESS_INTERVAL, load_records, register_records
 from excel_jump import jump_to_excel
 from loader import LoadResult, load_from_config
 from parser import EquipmentRecord
@@ -36,6 +36,42 @@ TREE_STYLE = "Equipment.Treeview"
 ROW_TAG_ODD = "row_odd"
 ROW_TAG_EVEN = "row_even"
 ALL_FACILITIES = "（すべて）"
+
+
+class RegisterProgressDialog:
+    """登録処理中の進捗を表示する（OK 不要で自動更新）。"""
+
+    def __init__(self, parent: tk.Misc) -> None:
+        self.top = tk.Toplevel(parent)
+        self.top.title("登録中")
+        self.top.transient(parent)
+        self.top.resizable(False, False)
+        self.top.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        frame = ttk.Frame(self.top, padding=24)
+        frame.pack()
+        self.message_var = tk.StringVar(value="登録中...")
+        ttk.Label(frame, textvariable=self.message_var, font=("", 11)).pack()
+
+        self.top.grab_set()
+        self._center_on_parent(parent)
+        self.top.update_idletasks()
+
+    def _center_on_parent(self, parent: tk.Misc) -> None:
+        parent.update_idletasks()
+        self.top.update_idletasks()
+        x = parent.winfo_rootx() + (parent.winfo_width() - self.top.winfo_width()) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - self.top.winfo_height()) // 2
+        self.top.geometry(f"+{x}+{y}")
+
+    def update_message(self, message: str) -> None:
+        self.message_var.set(message)
+        self.top.update_idletasks()
+
+    def close(self) -> None:
+        if self.top.winfo_exists():
+            self.top.grab_release()
+            self.top.destroy()
 
 
 class EquipmentListApp(tk.Tk):
@@ -109,7 +145,8 @@ class EquipmentListApp(tk.Tk):
 
         ttk.Button(search_row, text="検索", command=self._on_search).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(search_row, text="クリア", command=self._on_clear_search).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Button(search_row, text="登録", command=self._on_register).pack(side=tk.RIGHT)
+        self.register_button = ttk.Button(search_row, text="登録", command=self._on_register)
+        self.register_button.pack(side=tk.RIGHT)
 
         result_row = ttk.Frame(header)
         result_row.pack(fill=tk.X, pady=(6, 0))
@@ -413,9 +450,14 @@ class EquipmentListApp(tk.Tk):
             )
 
     def _on_register(self) -> None:
+        self.register_button.configure(state=tk.DISABLED)
         self.configure(cursor="wait")
         self.update_idletasks()
+        progress: RegisterProgressDialog | None = None
         try:
+            progress = RegisterProgressDialog(self)
+            progress.update_message("Excel読み込み中...")
+
             try:
                 load_result = load_from_config(self.config)
             except FileNotFoundError as exc:
@@ -433,8 +475,19 @@ class EquipmentListApp(tk.Tk):
                 messagebox.showwarning("登録不可", "設備データが見つかりませんでした。")
                 return
 
+            progress.update_message("登録中...")
+
+            def on_progress(count: int) -> None:
+                if progress is not None:
+                    progress.update_message(f"{count}件登録")
+
             try:
-                result = register_records(load_result.records, self.config.database_path)
+                result = register_records(
+                    load_result.records,
+                    self.config.database_path,
+                    on_progress=on_progress,
+                    progress_interval=REGISTER_PROGRESS_INTERVAL,
+                )
             except Exception as exc:
                 messagebox.showerror("登録エラー", f"SQLite への登録に失敗しました。\n{exc}")
                 return
@@ -452,11 +505,20 @@ class EquipmentListApp(tk.Tk):
                 message += f"\n\nExcel読み込みエラー: {len(load_result.errors)} 件"
             if result.errors:
                 message += f"\n\n登録エラー: {len(result.errors)} 件"
+
+            if progress is not None:
+                progress.close()
+                progress = None
+
+            self.configure(cursor="")
             if load_result.errors or result.errors:
                 messagebox.showwarning("登録完了（一部エラー）", message)
             else:
                 messagebox.showinfo("登録完了", message)
         finally:
+            if progress is not None:
+                progress.close()
+            self.register_button.configure(state=tk.NORMAL)
             self.configure(cursor="")
 
 
